@@ -1,4 +1,4 @@
-"""sigillum CLI: verify and open .p7m signed files."""
+"""sigillum CLI: verify .p7m (CAdES) and signed .pdf (PAdES) files."""
 from __future__ import annotations
 
 import argparse
@@ -42,9 +42,9 @@ from sigillum.viewer import open_file_large
 def parse_args(argv=None):
     p = argparse.ArgumentParser(
         prog="sigillum",
-        description="Verify and open eIDAS/CAdES .p7m signed files.",
+        description="Verify eIDAS/CAdES .p7m files and PAdES-signed PDFs.",
     )
-    p.add_argument("files", nargs="+", help="One or more .p7m files")
+    p.add_argument("files", nargs="+", help="One or more .p7m or signed .pdf files")
     p.add_argument("--no-tsl", action="store_true",
                    help="Skip EU trust list (eIDAS TSL) check")
     p.add_argument("--tsl-url", default=TSL_URL_IT,
