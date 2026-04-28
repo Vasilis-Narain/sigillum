@@ -30,6 +30,7 @@ classifiers = [
 dependencies = [
     "asn1crypto>=1.5",
     "cryptography>=41",
+    "pyHanko>=0.25",
 ]
 
 [project.optional-dependencies]
