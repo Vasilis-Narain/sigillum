@@ -30,6 +30,11 @@ from sigillum.cms import (
     verify_sig,
 )
 from sigillum.output import bold, cn_of, dim, green, red, status_line, yellow
+from sigillum.pades import (
+    bytes_after_signature,
+    coverage_complete,
+    extract_pdf_signatures,
+)
 from sigillum.tsl import TSL_URL_IT, fetch_tsl, parse_tsl_certs, verify_against_tsl
 from sigillum.viewer import open_file_large
 
@@ -58,9 +63,7 @@ def verify_file(path: str, args) -> bool:
         data = f.read()
 
     if is_pdf(data):
-        print(red(f"{src_name}: input is a PDF, not a CMS .p7m wrapper. "
-                  "PAdES (sig embedded inside PDF) is not supported."))
-        return False
+        return _verify_pdf(data, src_name, args)
 
     if not looks_like_cms(data):
         print(yellow(f"{src_name}: bytes do not look like CMS (DER/base64); parse may fail"))
@@ -140,10 +143,98 @@ def verify_file(path: str, args) -> bool:
     return all_ok
 
 
+def _verify_pdf(data: bytes, src_name: str, args) -> bool:
+    """PAdES path: extract embedded signatures and run pipeline per signature."""
+    try:
+        sigs = extract_pdf_signatures(data)
+    except Exception as e:
+        print(red(f"{src_name}: PDF parse failed: {e}"))
+        return False
+
+    if not sigs:
+        print(red(f"{src_name}: PDF contains no embedded signatures"))
+        return False
+
+    tsl_certs = None
+    if not args.no_tsl:
+        try:
+            tsl_certs = parse_tsl_certs(fetch_tsl(url=args.tsl_url))
+        except Exception as e:
+            tsl_certs = e  # carry the error through to per-sig render
+
+    all_ok = True
+    for idx, sig in enumerate(sigs, start=1):
+        label = f"{src_name}#{idx} ({sig.field_name})"
+        try:
+            ci = load_p7m(sig.cms_bytes)
+        except Exception as e:
+            print(red(f"{label}: not a valid CMS blob: {e}"))
+            all_ok = False
+            continue
+        if ci["content_type"].native != "signed_data":
+            print(red(f"{label}: not signed_data ({ci['content_type'].native})"))
+            all_ok = False
+            continue
+
+        sd = ci["content"]
+        signer_info = sd["signer_infos"][0]
+        try:
+            signer_asn1, all_asn1 = find_signer_cert(sd, signer_info)
+        except LookupError as e:
+            print(red(f"{label}: {e}"))
+            all_ok = False
+            continue
+        cert = x509.load_der_x509_certificate(signer_asn1.dump())
+        payload = sig.signed_bytes  # PAdES detached: signed bytes from /ByteRange
+
+        sig_ok = verify_sig(cert, signer_info, payload)
+        md_ok = check_message_digest(signer_info, payload)
+        ct_ok = check_content_type(signer_info, sd)
+
+        nb, na = cert_validity(cert)
+        now = datetime.now(timezone.utc)
+        in_window_now = nb <= now <= na
+        signing_time = get_signing_time(signer_info)
+        in_window_signed = nb <= signing_time <= na if signing_time else None
+
+        eku_notes = check_eku(cert)
+        chain = build_chain(signer_asn1.dump(), [c.dump() for c in all_asn1])
+        chain_ok, chain_err = verify_chain_signatures(chain)
+
+        if args.no_tsl:
+            tsl_status, tsl_anchor = "skipped", None
+        elif isinstance(tsl_certs, Exception):
+            tsl_status, tsl_anchor = f"error: {tsl_certs}", None
+        else:
+            tsl_status, tsl_anchor = verify_against_tsl(chain, tsl_certs)
+
+        coverage_ok = coverage_complete(sig.byte_range, sig.total_len)
+        tail_bytes = bytes_after_signature(sig.byte_range, sig.total_len)
+
+        window_ok = in_window_signed if signing_time is not None else in_window_now
+        tsl_ok = True if args.no_tsl else (tsl_status == "trusted")
+        sig_all_ok = (sig_ok and window_ok and chain_ok and coverage_ok
+                      and tail_bytes == 0
+                      and (md_ok is not False) and (ct_ok is not False) and tsl_ok)
+
+        if sig_all_ok and args.quiet_on_valid:
+            print(f"{label}: {bold(green('VALID'))}")
+        else:
+            _render(label, cert, signing_time, nb, na,
+                    sig_ok, md_ok, ct_ok, in_window_signed, in_window_now,
+                    chain, chain_ok, chain_err, tsl_status, tsl_anchor,
+                    eku_notes, args.no_tsl, sig_all_ok,
+                    pdf_coverage=(coverage_ok, tail_bytes))
+
+        all_ok = all_ok and sig_all_ok
+
+    return all_ok
+
+
 def _render(src_name, cert, signing_time, nb, na,
             sig_ok, md_ok, ct_ok, in_window_signed, in_window_now,
             chain, chain_ok, chain_err, tsl_status, tsl_anchor,
-            eku_notes, no_tsl, all_ok):
+            eku_notes, no_tsl, all_ok, pdf_coverage=None):
     fmt = "%Y-%m-%d %H:%M %Z"
     print()
     print(bold(f"── {src_name} ─────────────────────────────"))
@@ -182,6 +273,14 @@ def _render(src_name, cert, signing_time, nb, na,
 
     if eku_notes:
         print(f"  {yellow('!')} KeyUsage/EKU         {dim('; '.join(eku_notes))}")
+
+    if pdf_coverage is not None:
+        coverage_ok, tail_bytes = pdf_coverage
+        print(status_line("PDF byte-range cover", coverage_ok,
+                          "" if coverage_ok else "/ByteRange does not cover whole file"))
+        if tail_bytes > 0:
+            print(status_line("Bytes after signature", False,
+                              f"{tail_bytes} byte(s) appended after sig (incremental update)"))
 
     print()
     if all_ok:
