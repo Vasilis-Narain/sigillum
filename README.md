@@ -1,12 +1,14 @@
 # sigillum
 
-Verify and open Italian / eIDAS `.p7m` signed files (CAdES) from the command line.
+Verify and open Italian / eIDAS `.p7m` (CAdES) and signed `.pdf` (PAdES) files
+from the command line.
 
-`sigillum` parses a CMS SignedData blob, verifies the signature math, checks
-all signed attributes, walks the certificate chain, and anchors it against the
-EU Trust Service List (TSL) — printing a colour-coded report and a single
-`VERDICT: VALID` / `INVALID` line. The embedded payload is then extracted to a
-temp file and opened with the system viewer.
+`sigillum` parses a CMS SignedData blob — either standalone (`.p7m`) or
+embedded in a PDF's `/ByteRange` + `/Contents` — verifies the signature math,
+checks all signed attributes, walks the certificate chain, and anchors it
+against the EU Trust Service List (TSL). It prints a colour-coded report and a
+single `VERDICT: VALID` / `INVALID` line. For `.p7m` files the embedded payload
+is extracted to a temp file and opened with the system viewer.
 
 ## Features
 
@@ -18,7 +20,10 @@ temp file and opened with the system viewer.
 - Anchors the chain in the eIDAS Trust Service List (Italian AGID TSL by
   default; override with `--tsl-url`); cached for a week under
   `~/.cache/sigillum/`
-- Detects PDFs and refuses them politely (PAdES is a different format)
+- **PAdES support** (signed PDFs): extracts the embedded CMS via pyHanko, runs
+  it through the same verification pipeline, and reports PDF-specific notes:
+  `/ByteRange` coverage of the whole file and any bytes appended after the
+  signature (incremental updates that escape the signed region)
 - Detects renamed `.p7m` files (e.g. `foo.pdf` whose bytes are still CMS) by
   sniffing the magic bytes
 - Coloured TTY output, `NO_COLOR` honoured, plain when piped
@@ -51,7 +56,8 @@ sudo apt install wmctrl
 
 ```sh
 sigillum file.p7m                          # verify and open
-sigillum a.p7m b.p7m c.p7m                 # batch
+sigillum signed.pdf                        # verify a PAdES-signed PDF
+sigillum a.p7m b.p7m signed.pdf            # batch, mixed CAdES / PAdES
 sigillum file.p7m --no-open                # verify only, no viewer
 sigillum file.p7m --no-tsl                 # skip EU TSL check (offline)
 sigillum file.p7m --quiet-on-valid         # one-liner if VALID
@@ -80,10 +86,30 @@ Validity & trust
 VERDICT: VALID
 ```
 
+For a PAdES-signed PDF, two extra status lines are printed under each
+signature:
+
+```
+  ✓ PDF byte-range cover   ok
+  ✓ Bytes after signature  ok
+```
+
+The second turns red if any bytes follow the signed region — i.e. the file was
+modified after signing without a re-sign.
+
+## Development
+
+```sh
+pip install -e ".[dev]"     # installs pytest + ruff
+pytest                      # full suite
+ruff check .                # lint
+```
+
+CI runs `ruff` and `pytest` on Python 3.10 / 3.11 / 3.12 for every push and
+pull request (see `.github/workflows/ci.yml`).
+
 ## Limitations
 
-- **CAdES only.** PAdES (signature embedded inside a PDF's `/ByteRange`) is
-  not supported. Sniffed PDFs are rejected with a clear error.
 - **Italian TSL by default.** Other member-state TSLs work via `--tsl-url`,
   but the LOTL (List of Lists) is not auto-walked yet.
 - **No revocation checking.** CRL / OCSP are not consulted; a revoked but
