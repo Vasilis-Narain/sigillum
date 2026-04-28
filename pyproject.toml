@@ -32,6 +32,12 @@ dependencies = [
     "cryptography>=41",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
 # Fill these in once the GitHub repo exists:
 [project.urls]
 Homepage = "https://github.com/Vasilis-Narain/sigillum"
@@ -42,3 +48,16 @@ sigillum = "sigillum.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["sigillum*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"sigillum/cli.py" = ["E402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

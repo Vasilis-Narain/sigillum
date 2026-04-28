@@ -12,7 +12,6 @@ from cryptography.hazmat.primitives import serialization
 
 from sigillum.cms import verify_cert_signed_by
 
-
 TSL_URL_IT = "https://eidas.agid.gov.it/TL/TSL-IT.xml"
 TSL_CACHE_DIR = os.path.expanduser("~/.cache/sigillum")
 TSL_CACHE = os.path.join(TSL_CACHE_DIR, "TSL-IT.xml")

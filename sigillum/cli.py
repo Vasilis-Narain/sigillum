@@ -15,9 +15,19 @@ warnings.filterwarnings("ignore", message=r"Attribute's length must by .*")
 from cryptography import x509
 
 from sigillum.cms import (
-    build_chain, check_content_type, check_eku, check_message_digest,
-    cert_validity, find_signer_cert, get_payload, get_signing_time, is_pdf,
-    load_p7m, looks_like_cms, verify_chain_signatures, verify_sig,
+    build_chain,
+    cert_validity,
+    check_content_type,
+    check_eku,
+    check_message_digest,
+    find_signer_cert,
+    get_payload,
+    get_signing_time,
+    is_pdf,
+    load_p7m,
+    looks_like_cms,
+    verify_chain_signatures,
+    verify_sig,
 )
 from sigillum.output import bold, cn_of, dim, green, red, status_line, yellow
 from sigillum.tsl import TSL_URL_IT, fetch_tsl, parse_tsl_certs, verify_against_tsl
