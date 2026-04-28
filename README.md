@@ -38,7 +38,7 @@ pipx install -e ~/dev/sigillum
 ### Direct from GitHub
 
 ```sh
-pipx install git+https://github.com/<your-user>/sigillum.git
+pipx install git+https://github.com/Vasilis-Narain/sigillum.git
 ```
 
 For window-resize support on Linux desktops, also install `wmctrl`:

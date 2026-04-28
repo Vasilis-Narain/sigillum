@@ -33,9 +33,9 @@ dependencies = [
 ]
 
 # Fill these in once the GitHub repo exists:
-# [project.urls]
-# Homepage = "https://github.com/<your-user>/sigillum"
-# Issues   = "https://github.com/<your-user>/sigillum/issues"
+[project.urls]
+Homepage = "https://github.com/Vasilis-Narain/sigillum"
+Issues   = "https://github.com/Vasilis-Narain/sigillum/issues"
 
 [project.scripts]
 sigillum = "sigillum.cli:main"
