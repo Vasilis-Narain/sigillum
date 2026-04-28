@@ -11,7 +11,6 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
-
 HASH_MAP = {
     "sha1": hashes.SHA1, "sha224": hashes.SHA224,
     "sha256": hashes.SHA256, "sha384": hashes.SHA384,

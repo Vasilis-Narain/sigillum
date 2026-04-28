@@ -6,7 +6,6 @@ import sys
 
 from cryptography.x509.oid import NameOID
 
-
 USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
 
@@ -24,8 +23,10 @@ def dim(s):    return _c("2", s)
 
 def mark(b):
     """Tri-state check mark: True/False/None (unknown/skipped)."""
-    if b is True:  return green("✓")
-    if b is False: return red("✗")
+    if b is True:
+        return green("✓")
+    if b is False:
+        return red("✗")
     return yellow("?")
 
 
