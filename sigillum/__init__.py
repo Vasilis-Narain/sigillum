@@ -6,4 +6,4 @@ import warnings
 warnings.filterwarnings("ignore", message=r".*Attribute's length must.*")
 warnings.filterwarnings("ignore", category=UserWarning, module=r"cryptography\..*")
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

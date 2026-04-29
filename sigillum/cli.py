@@ -63,7 +63,7 @@ def verify_file(path: str, args) -> bool:
         data = f.read()
 
     if is_pdf(data):
-        return _verify_pdf(data, src_name, args)
+        return _verify_pdf(data, src_name, path, args)
 
     if not looks_like_cms(data):
         print(yellow(f"{src_name}: bytes do not look like CMS (DER/base64); parse may fail"))
@@ -143,7 +143,7 @@ def verify_file(path: str, args) -> bool:
     return all_ok
 
 
-def _verify_pdf(data: bytes, src_name: str, args) -> bool:
+def _verify_pdf(data: bytes, src_name: str, path: str, args) -> bool:
     """PAdES path: extract embedded signatures and run pipeline per signature."""
     try:
         sigs = extract_pdf_signatures(data)
@@ -227,6 +227,14 @@ def _verify_pdf(data: bytes, src_name: str, args) -> bool:
                     pdf_coverage=(coverage_ok, tail_bytes))
 
         all_ok = all_ok and sig_all_ok
+
+    if not all_ok:
+        ans = input("Open anyway? [y/N] ").strip().lower()
+        if ans != "y":
+            return False
+
+    if not args.no_open:
+        open_file_large(path)
 
     return all_ok
 
