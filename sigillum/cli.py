@@ -36,7 +36,35 @@ from sigillum.pades import (
     extract_pdf_signatures,
 )
 from sigillum.tsl import TSL_URL_IT, fetch_tsl, parse_tsl_certs, verify_against_tsl
+from sigillum.tst import extract_signature_timestamp, parse_tst, verify_tst
 from sigillum.viewer import open_file_large
+
+
+def _process_tst(signer_info):
+    """Return (tst_res_or_None, tst_ok). tst_ok: None=absent, True/False=present+verdict."""
+    tst_der = extract_signature_timestamp(signer_info)
+    if tst_der is None:
+        return None, None
+    try:
+        tst = parse_tst(tst_der)
+    except Exception as e:
+        return {"error": str(e), "sig_ok": False, "md_ok": None,
+                "imprint_ok": False, "gen_time": None, "chain": [],
+                "chain_ok": False, "chain_err": None, "tsa_cert": None}, False
+    outer_sig = signer_info["signature"].native
+    res = verify_tst(tst, outer_sig)
+    ok = bool(res["sig_ok"] and res["imprint_ok"] and res["chain_ok"]
+              and (res["md_ok"] is not False))
+    return res, ok
+
+
+def _time_basis(tst_res, tst_ok, signing_time, now):
+    """Pick (effective_time, basis_label) for cert-validity-window check."""
+    if tst_ok and tst_res and tst_res["gen_time"]:
+        return tst_res["gen_time"], "tsa"
+    if signing_time is not None:
+        return signing_time, "signing"
+    return now, "now"
 
 
 def parse_args(argv=None):
@@ -94,10 +122,11 @@ def verify_file(path: str, args) -> bool:
 
     nb, na = cert_validity(cert)
     now = datetime.now(timezone.utc)
-    in_window_now = nb <= now <= na
 
     signing_time = get_signing_time(signer_info)
-    in_window_signed = nb <= signing_time <= na if signing_time else None
+    tst_res, tst_ok = _process_tst(signer_info)
+    eff_time, basis = _time_basis(tst_res, tst_ok, signing_time, now)
+    in_window = nb <= eff_time <= na
 
     eku_notes = check_eku(cert)
     chain = build_chain(signer_asn1.dump(), [c.dump() for c in all_asn1])
@@ -113,18 +142,19 @@ def verify_file(path: str, args) -> bool:
         except Exception as e:
             tsl_status = f"error: {e}"
 
-    window_ok = in_window_signed if signing_time is not None else in_window_now
     tsl_ok = True if args.no_tsl else (tsl_status == "trusted")
-    all_ok = (sig_ok and window_ok and chain_ok
-              and (md_ok is not False) and (ct_ok is not False) and tsl_ok)
+    all_ok = (sig_ok and in_window and chain_ok
+              and (md_ok is not False) and (ct_ok is not False) and tsl_ok
+              and (tst_ok is not False))
 
     if all_ok and args.quiet_on_valid:
         print(f"{src_name}: {bold(green('VALID'))}")
     else:
         _render(src_name, cert, signing_time, nb, na,
-                sig_ok, md_ok, ct_ok, in_window_signed, in_window_now,
+                sig_ok, md_ok, ct_ok, in_window, basis,
                 chain, chain_ok, chain_err, tsl_status, tsl_anchor,
-                eku_notes, args.no_tsl, all_ok)
+                eku_notes, args.no_tsl, all_ok,
+                tst_res=tst_res, tst_ok=tst_ok)
 
     if not all_ok:
         ans = input("Open anyway? [y/N] ").strip().lower()
@@ -193,9 +223,10 @@ def _verify_pdf(data: bytes, src_name: str, path: str, args) -> bool:
 
         nb, na = cert_validity(cert)
         now = datetime.now(timezone.utc)
-        in_window_now = nb <= now <= na
         signing_time = get_signing_time(signer_info)
-        in_window_signed = nb <= signing_time <= na if signing_time else None
+        tst_res, tst_ok = _process_tst(signer_info)
+        eff_time, basis = _time_basis(tst_res, tst_ok, signing_time, now)
+        in_window = nb <= eff_time <= na
 
         eku_notes = check_eku(cert)
         chain = build_chain(signer_asn1.dump(), [c.dump() for c in all_asn1])
@@ -211,20 +242,21 @@ def _verify_pdf(data: bytes, src_name: str, path: str, args) -> bool:
         coverage_ok = coverage_complete(sig.byte_range, sig.total_len)
         tail_bytes = bytes_after_signature(sig.byte_range, sig.total_len)
 
-        window_ok = in_window_signed if signing_time is not None else in_window_now
         tsl_ok = True if args.no_tsl else (tsl_status == "trusted")
-        sig_all_ok = (sig_ok and window_ok and chain_ok and coverage_ok
+        sig_all_ok = (sig_ok and in_window and chain_ok and coverage_ok
                       and tail_bytes == 0
-                      and (md_ok is not False) and (ct_ok is not False) and tsl_ok)
+                      and (md_ok is not False) and (ct_ok is not False) and tsl_ok
+                      and (tst_ok is not False))
 
         if sig_all_ok and args.quiet_on_valid:
             print(f"{label}: {bold(green('VALID'))}")
         else:
             _render(label, cert, signing_time, nb, na,
-                    sig_ok, md_ok, ct_ok, in_window_signed, in_window_now,
+                    sig_ok, md_ok, ct_ok, in_window, basis,
                     chain, chain_ok, chain_err, tsl_status, tsl_anchor,
                     eku_notes, args.no_tsl, sig_all_ok,
-                    pdf_coverage=(coverage_ok, tail_bytes))
+                    pdf_coverage=(coverage_ok, tail_bytes),
+                    tst_res=tst_res, tst_ok=tst_ok)
 
         all_ok = all_ok and sig_all_ok
 
@@ -240,9 +272,10 @@ def _verify_pdf(data: bytes, src_name: str, path: str, args) -> bool:
 
 
 def _render(src_name, cert, signing_time, nb, na,
-            sig_ok, md_ok, ct_ok, in_window_signed, in_window_now,
+            sig_ok, md_ok, ct_ok, in_window, basis,
             chain, chain_ok, chain_err, tsl_status, tsl_anchor,
-            eku_notes, no_tsl, all_ok, pdf_coverage=None):
+            eku_notes, no_tsl, all_ok, pdf_coverage=None,
+            tst_res=None, tst_ok=None):
     fmt = "%Y-%m-%d %H:%M %Z"
     print()
     print(bold(f"── {src_name} ─────────────────────────────"))
@@ -260,10 +293,12 @@ def _render(src_name, cert, signing_time, nb, na,
     print(status_line("contentType attr",   ct_ok))
     print()
     print(bold("Validity & trust"))
-    if signing_time is not None:
-        print(status_line("Cert valid @ signing", in_window_signed))
+    if basis == "tsa":
+        print(status_line("Cert valid @ TSA time", in_window))
+    elif basis == "signing":
+        print(status_line("Cert valid @ signing",  in_window))
     else:
-        print(status_line("Cert valid now",       in_window_now,
+        print(status_line("Cert valid now",        in_window,
                           "no signing time → using current clock"))
     n = len(chain)
     print(status_line(f"Chain ({n} cert{'s' if n != 1 else ''})",
@@ -289,6 +324,23 @@ def _render(src_name, cert, signing_time, nb, na,
         if tail_bytes > 0:
             print(status_line("Bytes after signature", False,
                               f"{tail_bytes} byte(s) appended after sig (incremental update)"))
+
+    if tst_res is not None:
+        print()
+        print(bold("Timestamp (RFC 3161)"))
+        if tst_res.get("error"):
+            print(status_line("TST parse", False, tst_res["error"]))
+        else:
+            print(status_line("TST signature math",   tst_res["sig_ok"]))
+            print(status_line("TST messageDigest",    tst_res["md_ok"]))
+            print(status_line("Imprint matches sig",  tst_res["imprint_ok"]))
+            n = len(tst_res["chain"])
+            print(status_line(f"TSA chain ({n} cert{'s' if n != 1 else ''})",
+                              tst_res["chain_ok"], tst_res["chain_err"] or ""))
+            if tst_res["gen_time"]:
+                print(f"  {'genTime':<10}  {tst_res['gen_time'].strftime(fmt)}")
+            if tst_res["tsa_cert"]:
+                print(f"  {'TSA':<10}  {cn_of(tst_res['tsa_cert'].subject)}")
 
     print()
     if all_ok:
