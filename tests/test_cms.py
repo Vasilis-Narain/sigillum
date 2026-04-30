@@ -75,7 +75,7 @@ def test_tsl_anchor_present(p7m_bytes, self_signed):
     chain = build_chain(signer_der, all_der)
     status, anchor = verify_against_tsl(chain, [cert])
     assert status == "trusted"
-    assert anchor.public_bytes(serialization.Encoding.DER) == cert.public_bytes(
+    assert anchor.cert.public_bytes(serialization.Encoding.DER) == cert.public_bytes(
         serialization.Encoding.DER
     )
 
