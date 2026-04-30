@@ -35,7 +35,7 @@ from sigillum.pades import (
     coverage_complete,
     extract_pdf_signatures,
 )
-from sigillum.tsl import TSL_URL_IT, fetch_tsl, parse_tsl_certs, verify_against_tsl
+from sigillum.tsl import TSL_URL_IT, fetch_tsl, parse_tsl_anchors, verify_against_tsl
 from sigillum.tst import extract_signature_timestamp, parse_tst, verify_tst
 from sigillum.viewer import open_file_large
 
@@ -137,8 +137,8 @@ def verify_file(path: str, args) -> bool:
     if not args.no_tsl:
         try:
             tsl_xml = fetch_tsl(url=args.tsl_url)
-            tsl_certs = parse_tsl_certs(tsl_xml)
-            tsl_status, tsl_anchor = verify_against_tsl(chain, tsl_certs)
+            tsl_anchors = parse_tsl_anchors(tsl_xml, eff_time=eff_time)
+            tsl_status, tsl_anchor = verify_against_tsl(chain, tsl_anchors)
         except Exception as e:
             tsl_status = f"error: {e}"
 
@@ -185,12 +185,12 @@ def _verify_pdf(data: bytes, src_name: str, path: str, args) -> bool:
         print(red(f"{src_name}: PDF contains no embedded signatures"))
         return False
 
-    tsl_certs = None
+    tsl_xml = None
     if not args.no_tsl:
         try:
-            tsl_certs = parse_tsl_certs(fetch_tsl(url=args.tsl_url))
+            tsl_xml = fetch_tsl(url=args.tsl_url)
         except Exception as e:
-            tsl_certs = e  # carry the error through to per-sig render
+            tsl_xml = e  # carry the error through to per-sig render
 
     all_ok = True
     for idx, sig in enumerate(sigs, start=1):
@@ -234,10 +234,11 @@ def _verify_pdf(data: bytes, src_name: str, path: str, args) -> bool:
 
         if args.no_tsl:
             tsl_status, tsl_anchor = "skipped", None
-        elif isinstance(tsl_certs, Exception):
-            tsl_status, tsl_anchor = f"error: {tsl_certs}", None
+        elif isinstance(tsl_xml, Exception):
+            tsl_status, tsl_anchor = f"error: {tsl_xml}", None
         else:
-            tsl_status, tsl_anchor = verify_against_tsl(chain, tsl_certs)
+            tsl_anchors = parse_tsl_anchors(tsl_xml, eff_time=eff_time)
+            tsl_status, tsl_anchor = verify_against_tsl(chain, tsl_anchors)
 
         coverage_ok = coverage_complete(sig.byte_range, sig.total_len)
         tail_bytes = bytes_after_signature(sig.byte_range, sig.total_len)
@@ -307,8 +308,13 @@ def _render(src_name, cert, signing_time, nb, na,
     if no_tsl:
         print(status_line("EU TSL (eIDAS)", None, "skipped (--no-tsl)"))
     elif tsl_status == "trusted":
-        anchor = cn_of(tsl_anchor.subject) if tsl_anchor else "?"
-        print(status_line("EU TSL (eIDAS)", True, f"anchor: {anchor}"))
+        if tsl_anchor:
+            cn = cn_of(tsl_anchor.cert.subject)
+            tt = tsl_anchor.territory
+            note = f"anchor: {cn} ({tt})" if tt else f"anchor: {cn}"
+        else:
+            note = "anchor: ?"
+        print(status_line("EU TSL (eIDAS)", True, note))
     elif tsl_status == "untrusted":
         print(status_line("EU TSL (eIDAS)", False, "no matching anchor"))
     else:
