@@ -163,7 +163,21 @@ def verify_file(path: str, args) -> bool:
 
     if not args.no_open:
         inner = src_name[:-4] if src_name.lower().endswith(".p7m") else src_name + ".out"
-        suffix = os.path.splitext(inner)[1] or ".bin"
+        suffix = os.path.splitext(inner)[1]
+        if not suffix:
+            head = payload[:8]
+            if head.startswith(b"%PDF"):
+                suffix = ".pdf"
+            elif head.startswith(b"PK\x03\x04"):
+                suffix = ".zip"
+            elif head[:5] == b"{\\rtf":
+                suffix = ".rtf"
+            elif head.startswith(b"\xd0\xcf\x11\xe0"):
+                suffix = ".doc"
+            elif head[:5] == b"<?xml" or head[:1] == b"<":
+                suffix = ".xml"
+            else:
+                suffix = ".bin"
         fd, tmp = tempfile.mkstemp(prefix="sigillum_", suffix=suffix)
         with os.fdopen(fd, "wb") as f:
             f.write(payload)
